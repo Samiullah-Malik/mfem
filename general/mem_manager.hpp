@@ -12,6 +12,7 @@
 #ifndef MFEM_MEM_MANAGER_HPP
 #define MFEM_MEM_MANAGER_HPP
 
+#include "../../dbg.hpp"
 #include "globals.hpp"
 #include "error.hpp"
 #include <cstring> // std::memcpy
@@ -71,9 +72,11 @@ inline bool IsDeviceMemory(MemoryType mt) { return mt >= MemoryType::MANAGED; }
 /// Return true if the given host memory type needs to be registered.
 inline bool IsHostRegisteredMemory(MemoryType mt)
 {
-   return mt == MemoryType::HOST_DEBUG  ||
+#warning IsHostRegisteredMemory
+   return mt != MemoryType::HOST;
+   /*return mt == MemoryType::HOST_DEBUG  ||
           mt == MemoryType::HOST_UMPIRE ||
-          mt == MemoryType::MANAGED;
+          mt == MemoryType::MANAGED;*/
 }
 
 /// Return a suitable MemoryType for a given MemoryClass.
@@ -440,7 +443,6 @@ private:
 
    /// Allow to detect if a global memory manager instance exists.
    static bool exists;
-   static bool mm_env;
 
    /// Return true if the global memory manager instance exists.
    static bool Exists() { return exists; }
@@ -573,6 +575,9 @@ public:
    MemoryManager();
    ~MemoryManager();
 
+   /// Initialize the memory manager.
+   void Init();
+
    /// Configure the Memory manager with given default host and device types
    /// This method will be called when configuring a device.
    void Configure(const MemoryType h_mt, const MemoryType d_mt);
@@ -704,6 +709,7 @@ inline void Memory<T>::MakeAlias(const Memory &base, int offset, int size)
 template <typename T>
 inline void Memory<T>::Delete()
 {
+   dbg("h_mt:%d",h_mt);
    if (!(flags & REGISTERED) ||
        MemoryManager::Delete_((void*)h_ptr, h_mt, flags) == MemoryType::HOST)
    {

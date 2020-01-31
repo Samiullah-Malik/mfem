@@ -9,6 +9,7 @@
 // terms of the GNU Lesser General Public License (as published by the Free
 // Software Foundation) version 2.1 dated February 1999.
 
+#include "../../dbg.hpp"
 #include "../general/forall.hpp"
 #include "mem_manager.hpp"
 
@@ -441,11 +442,11 @@ public:
    void AliasUnprotect(const void *ptr, size_t bytes)
    { MmuAllow(MmuAddrP(ptr), MmuLengthP(ptr, bytes)); }
    void *HtoD(void *dst, const void *src, size_t bytes)
-   { return std::memcpy(dst, src, bytes); }
+   { dbg(""); return std::memcpy(dst, src, bytes); }
    void *DtoD(void *dst, const void *src, size_t bytes)
    { return std::memcpy(dst, src, bytes); }
    void *DtoH(void *dst, const void *src, size_t bytes)
-   { return std::memcpy(dst, src, bytes); }
+   { dbg(""); return std::memcpy(dst, src, bytes); }
 };
 
 #ifndef MFEM_USE_UMPIRE
@@ -517,16 +518,17 @@ public:
    DeviceMemorySpace *device[DeviceMemoryTypeSize];
 
 public:
-   Ctrl(): host{nullptr}, device{nullptr} { }
+   Ctrl(): host{nullptr}, device{nullptr} { dbg(""); }
 
    void Configure()
    {
+      dbg("Ctrl");
       if (host[HostMemoryType])
       {
          mfem_error("Memory backends have already been configured!");
       }
 
-      const bool debug = Device::Allows(Backend::DEBUG);
+      //const bool debug = Device::Allows(Backend::DEBUG);
 
       // Filling the host memory backends
       // HOST, HOST_32 & HOST_64 are always ready
@@ -541,10 +543,9 @@ public:
          static_cast<HostMemorySpace*>(new Aligned64HostMemorySpace());
 
       // Only create MmuHostMemorySpace if needed, as it reroutes signals
-      if (debug)
+      //if (debug)
       {
-         host[static_cast<int>(MemoryType::HOST_DEBUG)] =
-            static_cast<HostMemorySpace*>(new MmuHostMemorySpace());
+         host[static_cast<int>(MemoryType::HOST_DEBUG)] = nullptr;
       }
 
       host[static_cast<int>(MemoryType::HOST_UMPIRE)] =
@@ -566,42 +567,73 @@ public:
 #elif defined(MFEM_USE_HIP)
          static_cast<DeviceMemorySpace*>(new HipDeviceMemorySpace());
 #else
-         (debug) ?
-         static_cast<DeviceMemorySpace*>(new MmuDeviceMemorySpace()):
+         //(debug) ?
+         //static_cast<DeviceMemorySpace*>(new MmuDeviceMemorySpace());
          static_cast<DeviceMemorySpace*>(new NoDeviceMemorySpace());
 #endif
 
-      if (debug)
+      //if (debug)
       {
          device[static_cast<int>(MemoryType::DEVICE_DEBUG)-DeviceMemoryType] =
-            static_cast<DeviceMemorySpace*>(new MmuDeviceMemorySpace());
+            nullptr;
+         //static_cast<DeviceMemorySpace*>(new MmuDeviceMemorySpace());
       }
 
       device[static_cast<int>(MemoryType::DEVICE_UMPIRE)-DeviceMemoryType] =
-         static_cast<DeviceMemorySpace*>(new UmpireDeviceMemorySpace());
+         nullptr;
+      //static_cast<DeviceMemorySpace*>(new UmpireDeviceMemorySpace());
 
    }
 
    HostMemorySpace* Host(const MemoryType mt)
    {
+      //dbg("mt:%d", mt);
       const int mt_i = static_cast<int>(mt);
+      if (host[mt_i] == nullptr && mt == MemoryType::HOST_DEBUG)
+      {
+         host[mt_i] = new MmuHostMemorySpace();
+         device[static_cast<int>(MemoryType::DEVICE_DEBUG)-DeviceMemoryType]
+            = new MmuDeviceMemorySpace();
+      }
       MFEM_ASSERT(host[mt_i], "Memory manager has not been configured!");
       return host[mt_i];
    }
 
    DeviceMemorySpace* Device(const MemoryType mt)
    {
+      //dbg("mt:%d", mt);
       const int mt_i = static_cast<int>(mt) - DeviceMemoryType;
+      // Delay DEVICE_UMPIRE initialization
+      if (device[mt_i] == nullptr )
+      {
+         if (mt == MemoryType::DEVICE_UMPIRE)
+         {
+            device[mt_i] = new UmpireDeviceMemorySpace();
+         }
+         else if (mt == MemoryType::DEVICE_DEBUG)
+         {
+            host[static_cast<int>(MemoryType::HOST_DEBUG)]
+               = new MmuHostMemorySpace();
+            device[mt_i] = new MmuDeviceMemorySpace();
+         }
+         else
+         {
+            dbg("Internal error!");
+            MFEM_ABORT("Internal error!");
+         }
+      }
       MFEM_ASSERT(device[mt_i], "Memory manager has not been configured!");
       return device[mt_i];
    }
 
    ~Ctrl()
    {
+      dbg("");
       constexpr int mt_h = HostMemoryType;
       constexpr int mt_d = DeviceMemoryType;
       for (int mt = mt_h; mt < HostMemoryTypeSize; mt++) { delete host[mt]; }
       for (int mt = mt_d; mt < MemoryTypeSize; mt++) { delete device[mt-mt_d]; }
+      dbg("done");
    }
 };
 
@@ -1219,14 +1251,19 @@ void *MemoryManager::GetAliasHostPtr(const void *ptr, size_t bytes,
    return alias_h_ptr;
 }
 
-static MemoryType env_host_mem_type;
-static MemoryType env_device_mem_type;
-MemoryManager::MemoryManager()
+void MemoryManager::Init()
 {
-   exists = true;
+   if (exists) { return; }
+   dbg("");
    maps = new internal::Maps();
    ctrl = new internal::Ctrl();
-   if (mm_env) { Configure(env_host_mem_type, env_device_mem_type); }
+   ctrl->Configure();
+   exists = true;
+}
+
+MemoryManager::MemoryManager()
+{
+   dbg(""); Init();
 }
 
 MemoryManager::~MemoryManager() { if (exists) { Destroy(); } }
@@ -1234,14 +1271,8 @@ MemoryManager::~MemoryManager() { if (exists) { Destroy(); } }
 void MemoryManager::Configure(const MemoryType host_mt,
                               const MemoryType device_mt)
 {
-   if (!exists)
-   {
-      mm_env = true;
-      env_host_mem_type = host_mt;
-      env_device_mem_type = device_mt;
-      return;
-   }
-   ctrl->Configure();
+   dbg("%d, %d", host_mt, device_mt);
+   Init();
    host_mem_type = host_mt;
    device_mem_type = device_mt;
 }
@@ -1257,6 +1288,7 @@ void MemoryManager::SetUmpireAllocatorNames(const char *h_name,
 
 void MemoryManager::Destroy()
 {
+   dbg("");
    MFEM_VERIFY(exists, "MemoryManager has already been destroyed!");
    for (auto& n : maps->memories)
    {
@@ -1270,6 +1302,7 @@ void MemoryManager::Destroy()
    host_mem_type = MemoryType::HOST;
    device_mem_type = MemoryType::HOST;
    exists = false;
+   dbg("done");
 }
 
 void MemoryManager::RegisterCheck(void *ptr)
@@ -1352,7 +1385,6 @@ void MemoryManager::CheckHostMemoryType_(MemoryType h_mt, void *h_ptr)
 MemoryManager mm;
 
 bool MemoryManager::exists = false;
-bool MemoryManager::mm_env = false;
 
 #ifdef MFEM_USE_UMPIRE
 const char* MemoryManager::h_umpire_name = MFEM_UMPIRE_HOST;

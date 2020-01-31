@@ -9,6 +9,7 @@
 // terms of the GNU Lesser General Public License (as published by the Free
 // Software Foundation) version 2.1 dated February 1999.
 
+#include "../../dbg.hpp"
 #include "forall.hpp"
 #include "cuda.hpp"
 #include "occa.hpp"
@@ -61,6 +62,8 @@ static const char *backend_name[Backend::NUM_BACKENDS] =
 // Initialize the unique global Device variable.
 Device Device::device_singleton;
 bool Device::device_env = false;
+bool Device::mem_host_env = false;
+bool Device::mem_device_env = false;
 
 
 Device::Device() : mode(Device::SEQUENTIAL),
@@ -72,9 +75,56 @@ Device::Device() : mode(Device::SEQUENTIAL),
    device_mem_type(MemoryType::HOST),
    device_mem_class(MemoryClass::HOST)
 {
-   if (getenv("MFEM_ENV_DEVICE"))
+   dbg("");
+   if (getenv("MFEM_MEMORY"))
    {
-      Configure(std::string(getenv("MFEM_ENV_DEVICE")));
+      std::string mem_backend(getenv("MFEM_MEMORY"));
+      if (mem_backend == "host32")
+      {
+         mem_host_env = true;
+         //mem_device_env = true;
+         host_mem_type = MemoryType::HOST_32;
+         device_mem_type = MemoryType::HOST_32;
+      }
+      else if (mem_backend == "host64")
+      {
+         mem_host_env = true;
+         //mem_device_env = true;
+         host_mem_type = MemoryType::HOST_64;
+         device_mem_type = MemoryType::HOST_64;
+      }
+      else if (mem_backend == "umpire")
+      {
+         mem_host_env = true;
+         //mem_device_env = true;
+         host_mem_type = MemoryType::HOST_UMPIRE;
+         device_mem_type = MemoryType::HOST_UMPIRE;
+      }
+      else if (mem_backend == "debug")
+      {
+         mem_host_env = true;
+         //mem_device_env = true;
+         host_mem_type = MemoryType::HOST_DEBUG;
+         device_mem_type = MemoryType::HOST_DEBUG;
+      }
+      else if (mem_backend == "uvm")
+      {
+         mem_host_env = true;
+         mem_device_env = true;
+         host_mem_type = MemoryType::MANAGED;
+         device_mem_type = MemoryType::MANAGED;
+      }
+      else
+      {
+         dbg("\033[31mUnknown memory backend!");
+         MFEM_ABORT("Unknown memory backend!");
+      }
+      mm.Configure(host_mem_type, device_mem_type);
+   }
+
+   if (getenv("MFEM_DEVICE"))
+   {
+      Configure(std::string(getenv("MFEM_DEVICE")));
       device_env = true;
    }
 }
@@ -82,9 +132,12 @@ Device::Device() : mode(Device::SEQUENTIAL),
 
 Device::~Device()
 {
-   if ( device_env && !destroy_mm) { return; }
-   if (!device_env &&  destroy_mm)
+   dbg("");
+   //if ( device_env && !destroy_mm) { return; }
+   //if (!device_env &&  destroy_mm)
+   if (destroy_mm)
    {
+      dbg("device_option");
       free(device_option);
 #ifdef MFEM_USE_CEED
       CeedDestroy(&internal::ceed);
@@ -95,6 +148,7 @@ Device::~Device()
    Get().host_mem_class = MemoryClass::HOST;
    Get().device_mem_type = MemoryType::HOST;
    Get().device_mem_class = MemoryClass::HOST;
+   dbg("done");
 }
 
 void Device::Configure(const std::string &device, const int dev)
@@ -185,11 +239,9 @@ void Device::Print(std::ostream &out)
       out << "libCEED backend: " << ceed_backend << '\n';
    }
 #endif
-   out << std::endl;
    out << "Memory configuration: "
        << MemoryTypeName[static_cast<int>(host_mem_type)];
-   if (Device::Allows(Backend::DEVICE_MASK) ||
-       Device::Allows(Backend::DEBUG))
+   //if (Device::Allows(Backend::DEVICE_MASK))
    {
       out << ", " << MemoryTypeName[static_cast<int>(device_mem_type)];
    }
@@ -198,6 +250,8 @@ void Device::Print(std::ostream &out)
 
 void Device::UpdateMemoryTypeAndClass()
 {
+   if (mem_host_env || mem_device_env) { dbg(""); }
+
 #ifdef MFEM_USE_UMPIRE
    const bool umpire = true;
 #else
@@ -210,15 +264,36 @@ void Device::UpdateMemoryTypeAndClass()
    // Enable the device memory type
    if (device)
    {
-      device_mem_type = MemoryType::DEVICE;
+      if (!mem_device_env)
+      {
+         if (mem_host_env)
+         {
+            switch (host_mem_type)
+            {
+               case MemoryType::HOST_UMPIRE:
+                  device_mem_type = MemoryType::DEVICE_UMPIRE;
+                  break;
+               case MemoryType::HOST_DEBUG:
+                  device_mem_type = MemoryType::DEVICE_DEBUG;
+                  break;
+               default:
+                  device_mem_type = MemoryType::DEVICE;
+            }
+         }
+         else
+         {
+            device_mem_type = MemoryType::DEVICE;
+         }
+      }
       device_mem_class = MemoryClass::DEVICE;
    }
 
    // If MFEM has been compiled with Umpire support, use it as the default
    if (umpire)
    {
-      host_mem_type = MemoryType::HOST_UMPIRE;
-      if (device) { device_mem_type = MemoryType::DEVICE_UMPIRE; }
+      if (!mem_host_env) { host_mem_type = MemoryType::HOST_UMPIRE; }
+      if (device && !mem_device_env)
+      { device_mem_type = MemoryType::DEVICE_UMPIRE; }
    }
 
    // Enable the UVM shortcut when requested
@@ -228,7 +303,6 @@ void Device::UpdateMemoryTypeAndClass()
    {
       host_mem_type = MemoryType::MANAGED;
       device_mem_type = MemoryType::MANAGED;
-      device_mem_class = MemoryClass::DEVICE;
    }
 
    // Enable the DEBUG mode when requested
@@ -236,7 +310,6 @@ void Device::UpdateMemoryTypeAndClass()
    {
       host_mem_type = MemoryType::HOST_DEBUG;
       device_mem_type = MemoryType::DEVICE_DEBUG;
-      device_mem_class = MemoryClass::DEVICE;
    }
 
    // Update the memory manager with the new settings
