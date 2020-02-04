@@ -16,6 +16,7 @@ if (MFEM_USE_MPI)
     ex1.cpp
     ex1p.cpp
     ex2.cpp
+    ex3.cpp
     ex6p.cpp
     )
 endif()
