@@ -1,7 +1,7 @@
 //                                MFEM Example 3
 //        IMPLICIT Residual Based Error Estimator for Maxwell Equations 
 //
-// Compile with: make ex3
+// Compile with: make pumi_ex3
 //
 // Sample runs:  ex3 -m ../data/star.mesh
 //               ex3 -m ../data/beam-tri.mesh -o 2
@@ -32,8 +32,6 @@
 //               bilinear form, as well as the computation of discretization
 //               error when the exact solution is known. Static condensation is
 //               also illustrated.
-//
-//               We recommend viewing examples 1-2 before viewing this example.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -49,16 +47,14 @@
 #include <apfConvert.h>
 #include <gmi_mesh.h>
 #include <crv.h>
-
+  
 
 using namespace std;
 using namespace mfem;
 
-//---------------------- My Function Declarations----------------------------//
-//---------------------------------------------------------------------------//
+// Implicit Residual Based Error Estimation functions.
 int checkConnectivity(Array<int> a, Array<int> b); // helper method
 void computeFaceOutwardNormal(int faceNo, int elemNo, Vector& normal, Mesh* mesh); // helper method
-void normalizeVector(Vector& v); 
 void getElemCavityFaces(int elem, Vector ord_fi, Mesh* mesh, Vector& faces);
 int edgeIsExterior(int edgeNo, int nf, const int* fi, Mesh* mesh);
 void cross3(Vector v1, Vector v2, Vector& cross);
@@ -86,14 +82,11 @@ void assembleExteriorLHS(int edgeNo, Vector ord_ei, Vector ord_fi,
 void assembleExteriorRHS(int edgeNo, Vector ord_ei, Vector ord_fi, Mesh* mesh,
                    FiniteElementSpace* fespace, GridFunction x, VectorFEDomainLFIntegrator* dlfi,
                    CurlCurlIntegrator* cci, VectorFEMassIntegrator* mi, Vector& rhs);
-void evaluateThetaVector(int faceNo, Vector theta_values, Mesh* mesh,
-                         FiniteElementSpace* fespace, Vector& theta_vec);
 int findEdgeLocalIndexInFace(int edgeNo, int faceNo, Mesh* mesh);
 void computeLambda_BVP(int elemNo, FiniteElementSpace* fespace, Mesh* mesh,
                        std::vector<vector<double>> THETA_COEFF, GridFunction x, Vector& lambda_k);
 void computeBilinearForm_BVP(int elemNo, Mesh* mesh, GridFunction x, 
                              FiniteElementSpace* fespace, Vector& b_k);
-void applyDBC(int elemNo, Mesh* mesh, FiniteElementSpace* fespace, Table edge_face);
 void getEssentialElementTrueDofs(int elemNo, const Array<int> &bdr_attr_is_ess,
                                  Array<int> &ess_elem_tdofs_list,
                                  Array<int> &uness_elem_tdofs_list,
@@ -328,19 +321,9 @@ int main(int argc, char *argv[])
       sol_sock << "solution\n" << *mesh << x << flush;
    }
 
-//Testing Space
-int faceN = 0;
-if(mesh->FaceIsInterior(faceN)) 
-{
-  FaceElementTransformations* ftransm = mesh->GetFaceElementTransformations(faceN);
-}
-cout << "END TESTING " << endl;
+  // 15. Estimate error using Implicit Residual Based Error Estimator
 
-  /////////////////////////////////////////////////////////////////////////
-  //---------------------------------------------------------------------//
-  //------------ Implicit Residual Error Routine-------------------------//
-
-  //-----UPWARD FACE AND ELEMENT CONNECTIVITIES OF EDGES-----//   
+  // (15a). UPWARD FACE AND ELEMENT CONNECTIVITIES OF EDGES
   // get edge to face connections
   Table &face_edge = *mesh->GetFaceEdgeTable(); 
   Table edge_face; 
@@ -351,33 +334,28 @@ cout << "END TESTING " << endl;
   Table edge_elem; 
   Transpose(elem_edge, edge_elem); 
 
-  //-----EQUILIBRATION OF RESIDUALS METHOD-----// 
-
-  // Define Bilinear and Linear Forms 
+  // (15b). EQUILIBRATION OF RESIDUALS METHOD
+  // Define Bilinear and Linear Forms - (used in FEM computation)
   VectorFEDomainLFIntegrator* dlfi = new VectorFEDomainLFIntegrator(f);
   CurlCurlIntegrator* cci = new CurlCurlIntegrator(*muinv);
   VectorFEMassIntegrator* mi = new VectorFEMassIntegrator(*sigma);
 
-  // Define a vector of vectors to save the values of g for all edges
-  // Basically, for each edge system of eqns, we save the solution vector g.
-  std::vector<vector<double>> allgs(mesh->GetNEdges());
-
-  // Define a vector of vectors to save the three values of g 
-  // on each face
+  // Define a vector of vectors to save the three values of g coeffs
+  // on each face.
   std::vector<vector<double>> facegs(mesh->GetNFaces());
 
   // Define a vector of vectors to save the edges corresponding
-  // to g on each face (in order)
+  // to g coeffs on each face (in order).
   std::vector<vector<double>> edgesOfgs(mesh->GetNFaces());
 
   // loop over all edges to build edge-based patches
   for (int edgeNo = 0; edgeNo < mesh->GetNEdges(); edgeNo++)
   {
-    // get connectivity info for each edge (to build edge patch)
+    // get upward connectivity info for each edge (to build edge patch)
     int nf = edge_face.RowSize(edgeNo);
     int ne = edge_elem.RowSize(edgeNo);
-    const int *fi = edge_face.GetRow(edgeNo); // faces adjacent to edge i
-    const int *ei = edge_elem.GetRow(edgeNo); // elements adjacent to edge i
+    const int *fi = edge_face.GetRow(edgeNo); // faces adjacent to edge 
+    const int *ei = edge_elem.GetRow(edgeNo); // elements adjacent to edge 
 
     // Separate loops for interior and boundary edge patches.
     // 1: Boundary Edges
@@ -389,8 +367,8 @@ cout << "END TESTING " << endl;
       // FIRST, Arrange the upward adjacent faces and elements in an order
       Vector ord_ei, ord_fi; 
       orderEdgePatchEntities(edgeNo, ne, nf, ei, fi, mesh, ord_ei, ord_fi);
-      cout << "ordered upward adjacent elements: ";  ord_ei.Print(cout, ne);
-      cout << "ordered upward adjacent faces: ";  ord_fi.Print(cout, nf);
+      //cout << "ordered upward adjacent elements: ";  ord_ei.Print(cout, ne);
+      //cout << "ordered upward adjacent faces: ";  ord_fi.Print(cout, nf);
 
       // SECOND, assemble LHS square matrix ((g_k)^2 -> min) (DEMKOWICZ)
       DenseMatrix A(ne+nf,ne+nf);
@@ -409,16 +387,8 @@ cout << "END TESTING " << endl;
       A.Mult(G,g);
       //cout << "g: "; g.Print(cout, ne+nf); cout <<endl;
 
-      // FIFTH, save the g values in the vector of vectors
-      // Ignore the values g(nf)-g(nf+ne) which are associated
-      // with Lagrange multipliers.
-      allgs[edgeNo].resize(nf);
-      for(int ii = 0; ii < nf; ii++)
-      {
-        allgs[edgeNo][ii] = g(ii);
-      }
 
-      // SIXTH, save the g values on their respective faces
+      // FIFTH, save the g values on their respective faces
       for(int ii = 0; ii < nf; ii++)
       {
         int faceNo = ord_fi(ii);
@@ -470,14 +440,7 @@ cout << "END TESTING " << endl;
       A.MultTranspose(mu,g);
       //cout << "g: ";  g.Print(cout, ne); cout << endl;
 
-      // SEVENTH, save the g values in the vector of vectors
-      allgs[edgeNo].resize(g.Size());
-      for(int ii = 0; ii < nf; ii++)
-      {
-        allgs[edgeNo][ii] = g(ii);
-      }
-
-      // EIGHTH, save the g values on their respective faces
+      // SEVENTH, save the g values on their respective faces
       for(int ii = 0; ii < nf; ii++)
       {
         int faceNo = ord_fi(ii);
@@ -488,7 +451,6 @@ cout << "END TESTING " << endl;
   } // end loop ( all edge based patches ) 
   // At this point, each face of the mesh has 3 g values. 
 
-  //---------------------------------------------------------//
   // NOW SOLVE FOR THETA COEFFS ON EACH FACE
   //cout << " Solving for THETA VECTORS " << endl;
 
@@ -527,7 +489,7 @@ cout << "END TESTING " << endl;
     computeFaceMassMatrix(faceNo, mesh, fespace, mass_matrix);
     //cout << endl; cout << "Mass matrix " << endl; printDenseMatrix(mass_matrix); cout << endl;
  
-    // Solve the system
+    // Solve the system (HPD)
     Vector theta(num_edges); theta = 0.0;
     CG(mass_matrix, g, theta, 0, 20, 1e-12, 1e-24);
     // cout << "Theta values for face " << faceNo << endl; theta.Print(cout,num_edges);
@@ -537,10 +499,8 @@ cout << "END TESTING " << endl;
     {
       THETA_COEFF[faceNo].push_back(theta(ii));
     }
-  }
-  //--------- END OF EQUILIBRATION OF RESIDUALS METHOD---------- // 
+  } // end of equilibration of residuals/flux functionals
 
-  // --------------Solve Local BVPs ------------ //
   
   // Define PUMI Fields for Visualization In Paraview
   apf::Field* error_Vector_Field = 0;
@@ -574,8 +534,9 @@ cout << "END TESTING " << endl;
   nodal_size_Field = apf::createLagrangeField(pumi_mesh, "nodal_size_field", apf::SCALAR, 1);
   // ______________________________________________________________________________________________  
   
+  // (15c). Solve Local BVPs
   // Define higher-order Nedelec FE Space
-  int orderp1 = order+1; cout << "Orderp1 " << orderp1 << endl;
+  int orderp1 = order+1; //cout << "Orderp1 " << orderp1 << endl;
   FiniteElementCollection *fecp1 = new ND_FECollection(orderp1, dim, 1, 0);
   FiniteElementSpace *fespacep1 = new FiniteElementSpace(mesh, fecp1);
 
@@ -632,7 +593,7 @@ cout << "END TESTING " << endl;
     for(int i = 0; i < eldofs.Size(); i++)
     {
       if(eldofs[i] < 0)
-       l_k(i) =  -1 * l_k(i); // TODO taking care of negative dof value
+       l_k(i) =  -1 * l_k(i); // taking care of negative dof value
     }
     //cout << "Linear Form Vector " << elemNo << endl; l_k.Print(cout,1); cout << endl;
     //bklksum.Add(1.0, b_k);
@@ -656,8 +617,8 @@ cout << "END TESTING " << endl;
     Array<int> ess_bdr(mesh->bdr_attributes.Max()); ess_bdr = 1;
     Array<int> ess_elem_tdofs_list, uness_elem_tdofs_list;
     getEssentialElementTrueDofs(elemNo, ess_bdr, ess_elem_tdofs_list, uness_elem_tdofs_list, mesh, fespacep1);
-    cout << " TRUE DOF LIST FOR ELEM " << elemNo << ": " << ess_elem_tdofs_list.Size() << endl; ess_elem_tdofs_list.Print(cout, ess_elem_tdofs_list.Size()); cout << endl;
-    cout << " OTHER DOF LIST FOR ELEM " << elemNo << ": " << uness_elem_tdofs_list.Size() << endl; uness_elem_tdofs_list.Print(cout, uness_elem_tdofs_list.Size()); cout << endl;
+    //cout << " TRUE DOF LIST FOR ELEM " << elemNo << ": " << ess_elem_tdofs_list.Size() << endl; ess_elem_tdofs_list.Print(cout, ess_elem_tdofs_list.Size()); cout << endl;
+    //cout << " OTHER DOF LIST FOR ELEM " << elemNo << ": " << uness_elem_tdofs_list.Size() << endl; uness_elem_tdofs_list.Print(cout, uness_elem_tdofs_list.Size()); cout << endl;
   
     // eliminate DBC
     DenseMatrix Anew; Vector Bnew, Xnew, X;
@@ -683,20 +644,19 @@ cout << "END TESTING " << endl;
       
     // 7. Compute L2 Norm Integral Error
     double elem_l2integ_error = computeElementImplicitL2Error(elemNo, phi, mesh, fespacep1);
-    setScalar(l2_error_Field, ent, 0, elem_l2integ_error); // set error scalar
+    setScalar(l2_error_Field, ent, 0, elem_l2integ_error); // write to field
     global_l2_error += elem_l2integ_error;
      
     elemNo++;
-}
-  //--------------- END OF LOCAL BVPS --------------------------//
+  }
   //--------------- END OF ERROR ESTIMATION ROUTINE ------------//
   
   //cout << "LAMBDA K SUM " << endl; lsum.Print(cout, 1); cout << endl;    
   //cout << "BKLK  K SUM " << endl; bklksum.Print(cout, 1); cout << endl;    
 
 
-  // Write out PUMI Fields for Paraview Visualization
-  //apf::MeshEntity* ent;
+  // 16. Write out PUMI Fields for Paraview Visualization.
+  // Fields include exact field, solution field, error fields
   itr = pumi_mesh->begin(3);
   elemNo = 0;
   while ((ent = pumi_mesh->iterate(itr)))  // iterate over all regions
@@ -712,7 +672,6 @@ cout << "END TESTING " << endl;
     for(int i = 0; i < dim; i++) { efem[i] = vval(i); }
     setVector(E_fem_Field, ent, 0, efem); 
 
-
     // 2. write E_exact field (vector)
     Vector vexact(dim);
     eltr->SetIntPoint(center);
@@ -721,7 +680,6 @@ cout << "END TESTING " << endl;
     for(int i = 0; i < dim; i++) { eexact[i] = vexact(i); }
     setVector(E_exact_Field, ent, 0, eexact); 
     
-
     // 3. write E_fem_exact_field (scalar)
     Vector3 efem_exact = efem - eexact;
     double efem_exact_norm = (efem_exact[0] * efem_exact[0]) + (efem_exact[1] * efem_exact[1]) + (efem_exact[2] * efem_exact[2]);
@@ -731,7 +689,6 @@ cout << "END TESTING " << endl;
     // 4. Write out exact error field
     double exact_elem_error = computeElementExactL2Error(elemNo, E, mesh, fespace, x);
     setScalar(exact_error_Field, ent, 0, exact_elem_error);   
-
 
     elemNo++;    
   }
@@ -796,9 +753,9 @@ cout << "END TESTING " << endl;
   }
 
   
-  //-------------------------------- PUMI MESH ADAPT -------------------------------------------------------------//
+  // 17. Compute Size Field for PUMI Mesh Adapt
 
-  // loop over elements to compute element size field
+  // (17a). loop over elements to compute element size field
   double elem_target_error = global_l2_error/mesh->GetNE();
   double alpha = 0.25;
   double beta = 2.0;
@@ -827,7 +784,7 @@ cout << "END TESTING " << endl;
     elemNo++;
   }
 
-  // loop over vertices to compute nodal size field
+  // (17b.) loop over vertices to compute nodal size field
   itr = pumi_mesh->begin(0);
   while ((ent = pumi_mesh->iterate(itr)))  
   {
@@ -843,17 +800,17 @@ cout << "END TESTING " << endl;
     average = average / error_total;
 
     apf::setScalar(nodal_size_Field, ent, 0, average);
-
   }
 
-
-
-  apf::writeVtkFiles("error_Fields", pumi_mesh);
-  //------------------------------------------ FIELDS WRITTEN ----------------------------------------------------//
-  
+  apf::writeVtkFiles("error_Fields", pumi_mesh); // Write all Fields
 
   cout << " END ROUTINE " << endl;
+
+  // 18. Perform Mesh Adapt
  
+  //-------------------------------------------------------------------------//
+  //-------------End Implicit Residual Error & Mesh Adapt Routine------------//
+  //-------------------------------------------------------------------------//
 /*
   cout << "PRINTING ALL G's" << endl; 
   for (int i = 0; i < mesh->GetNFaces(); i++)
@@ -890,11 +847,8 @@ cout << "END TESTING " << endl;
   }
   cout << "END PRINTING" << endl;
 */     
-  //-------------------------------------------------------------------------//
-  //-------------End Implicit Residual Error Routine-------------------------//
-  //-------------------------------------------------------------------------//
 
-   // 15. Free the used memory.
+   // 19. Free the used memory.
    delete a;
    delete sigma;
    delete muinv;
@@ -938,8 +892,9 @@ void f_exact(const Vector &x, Vector &f)
       if (x.Size() == 3) { f(2) = 0.0; }
    }
 }
-////////-----------------------------------------------//////
-////////--------MY FUNCTION DECLARATIONS---------------//////
+
+
+// Implicit Residual Based Error Estimation functions.
 
 /**
  * This method checks if any element of array2 is equal to any element of array1.
@@ -994,19 +949,7 @@ void computeFaceOutwardNormal(int faceNo, int elemNo, Vector& normal, Mesh* mesh
 }
 
 /**
- * This method normalizes a vector using l2 norm.
- */
-void normalizeVector(Vector& v)
-{
-  double l2norm = v.Norml2();
-  for(int i = 0; i < v.Size(); i++) 
-  {
-    v(i) = v(i) / l2norm;   
-  }
-}
-
-/**
- * This method assembles the RHS vector on each interior
+ * This method assembles the RHS vector G on each interior
  * edge-based patch.
  *
  * @param edgeNo the edge around which the patch is formed 
@@ -1020,8 +963,8 @@ void assembleInteriorRHS(int edgeNo, Vector ord_ei, Vector ord_fi, Mesh* mesh,
                    CurlCurlIntegrator* cci, VectorFEMassIntegrator* mi, Vector& rhs)
 {
   rhs = 0.0;
-  double test = 0.0; // test
-  double test2 = 0.0; // test
+  //double test = 0.0; // test
+  //double test2 = 0.0; // test
   int ne = ord_ei.Size();
   int nf = ord_fi.Size();
   //cout << "edgeNo " << edgeNo << endl;
@@ -1036,11 +979,11 @@ void assembleInteriorRHS(int edgeNo, Vector ord_ei, Vector ord_fi, Mesh* mesh,
 
     // (Step 2) *** compute linear form integral (2) *** //
     terms3(1) = computeLinearFormIntegral(edgeNo, elemNo, mesh, fespace, dlfi);
-    test2 += terms3(0) - terms3(1);
+    //test2 += terms3(0) - terms3(1);
         
     // (Step 3) *** compute flux term integral (3) *** //
     terms3(2) = computeFluxTermIntegral(edgeNo, elemNo, ord_fi, mesh, x, fespace);
-    test += terms3(2);
+    //test += terms3(2);
 
     // Step (4) Sum up all values in terms3 and set the sum as the corresponding entry in RHS vector
     rhs(e) = terms3(0) - terms3(1) - terms3(2);
@@ -1120,6 +1063,7 @@ void getElemCavityFaces(int elemNo, Vector ord_fi, Mesh* mesh, Vector& faces)
     }    
   }
 }
+
 /**
  * This method determines if a given edge in the mesh lies in the 
  * interior of the mesh or on the boundary of the mesh. 
@@ -1195,7 +1139,7 @@ double computeFluxFaceIntegral(int faceNo, int elemNo, int edgeIndex, Mesh* mesh
   int elemNo1 = ftrans->Elem1No;
   int elemNo2 = ftrans->Elem2No; 
   computeFaceOutwardNormal(faceNo, elemNo, normal, mesh);
-  normalizeVector(normal); 
+  normal /= normal.Norml2();
 
   // 2. set integration rule on the face and transform it to elem1 and elem2 
   const IntegrationRule *ir = &IntRules.Get(ftrans->FaceGeom, ftrans->Elem1->Order()-1);
@@ -1369,7 +1313,7 @@ double computeBilinearFormIntegral(int edgeNo, int elemNo, Mesh* mesh, GridFunct
   Array<int> eldofs;
   fespace->GetElementDofs(elemNo, eldofs);
   Vector eldofs_vals(eldofs.Size()); 
-  x.GetSubVector(eldofs, eldofs_vals); // TODO fix the negative dof value??
+  x.GetSubVector(eldofs, eldofs_vals); 
   //cout << "Element Dofs for elemNo" << elemNo << ": "; eldofs.Print(cout, 6);
   //cout << "Dof Values for elemNo " << elemNo << ": "; eldofs_vals.Print(cout, 6);
 
@@ -1377,7 +1321,7 @@ double computeBilinearFormIntegral(int edgeNo, int elemNo, Mesh* mesh, GridFunct
   Vector vals(eldofs.Size()); vals = 0.0;
   elmat.Mult(eldofs_vals,vals);
   //cout << "Bilinear Form (1) elemNo " << elemNo << ": " ; vals.Print(cout, ndofs);
-  if(eldofs[edgeIndex] < 0) { return -1 * vals(edgeIndex); } // TODO taking care of negative dof value
+  if(eldofs[edgeIndex] < 0) { return -1 * vals(edgeIndex); } // taking care of negative dof value
   return vals(edgeIndex); 
 }
 
@@ -1399,24 +1343,21 @@ double computeLinearFormIntegral(int edgeNo, int elemNo, Mesh* mesh,
    ElementTransformation* tr = mesh->GetElementTransformation(elemNo);
    Vector elvect(fe->GetDof()); elvect = 0.0;
    dlfi->AssembleRHSElementVect(*fe, *tr, elvect);
-   Array<int> eldofs; fespace->GetElementDofs(elemNo, eldofs);  // TODO Taking care of negative dof indices
-   if(eldofs[edgeIndex] < 0) { return -1 * elvect(edgeIndex); } // TODO Takinf care of negative dof indices
+   Array<int> eldofs; fespace->GetElementDofs(elemNo, eldofs);  // Taking care of negative dof indices
+   if(eldofs[edgeIndex] < 0) { return -1 * elvect(edgeIndex); } // Taking care of negative dof indices
    
    return elvect(edgeIndex);
 }
 
 /**
- * This method assembles the mass matrix on the face
- * to solve for the theta values.
+ * This method assembles the mass matrix on the face to solve for the theta
+ * coeffs. 2D Nedelec elements are their shape functions are used.
  *
  * @param  faceNo current face on which the matrix is to be assembled
- * @param g_edges the edges of the faceNo in the order corresponding to
- *                the order of the entries in RHS g vector
  */
  void computeFaceMassMatrix(int faceNo, Mesh* mesh,
                             FiniteElementSpace* fespace, DenseMatrix& facemat)
 {
- 
   // 1. CALCULATE THE DOF x DOF Mass matrix
   // Get the integration rule for the face
   FaceElementTransformations* ftr = mesh->GetFaceElementTransformations(faceNo);
@@ -1430,7 +1371,6 @@ double computeLinearFormIntegral(int edgeNo, int elemNo, Mesh* mesh,
   DenseMatrix vshape(dof, dim); vshape = 0.0; // dof x dim (3 x 3)
   facemat.SetSize(dof);
 
-  // test 
   Array<int> facedofs; fespace->GetFaceDofs(faceNo, facedofs);
   //cout << " ND Face " << faceNo << " Dofs "; facedofs.Print(cout, facedofs.Size()); 
 
@@ -1444,7 +1384,7 @@ double computeLinearFormIntegral(int edgeNo, int elemNo, Mesh* mesh,
     ftr->Face->SetIntPoint(&ip);
     fe->CalcVShape(*ftr->Face, vshape); 
 
-    // TODO testing negative dof indices
+    // negative dof indices
     for(int ind = 0; ind < facedofs.Size(); ind++)
     {
       if(facedofs[ind] < 0)
@@ -1460,59 +1400,6 @@ double computeLinearFormIntegral(int edgeNo, int elemNo, Mesh* mesh,
 }
 
 /**
- * This method evaluates the theta vector on a face as a linear combination
- * of the shape functions associated with the edges of the face and using
- * the corresponding theta parameters as the weights in the expansion.
- *
- * @param faceNo the face on which theta vector is being evaluated
- * @param elemNo the current upward adjacent element of the face
- * @param 
- */
-void evaluateThetaVector(int faceNo, Vector theta_values, Mesh* mesh,
-                         FiniteElementSpace* fespace, Vector& theta_vec)
-{
-  // Get the integration point for the face
-  FaceElementTransformations* ftr = mesh->GetFaceElementTransformations(faceNo);
-  Geometry::Type geo_type = mesh->GetFaceGeometryType(ftr->Face->ElementNo);
-  const IntegrationPoint *center = &Geometries.GetCenter(geo_type); // center of face
-  ftr->Face->SetIntPoint(center);
-
-  // Get the finite element on the face
-  const FiniteElement* fe = fespace->GetFaceElement(faceNo);
-  int dof = fe->GetDof();
-  int dim = ftr->Elem1->GetSpaceDim();
-  DenseMatrix vshape(dof, dim); vshape = 0.0; // dof x dim (3 x 3)
-
-  // evaluate shape functions on the face
-  fe->CalcVShape(*ftr->Face, vshape); 
-
-  // TODO test ND negative dofs
-  Array<int> facedofs; fespace->GetFaceDofs(faceNo, facedofs);
-  //cout << " ND Face " << faceNo << " Dofs "; facedofs.Print(cout, facedofs.Size()); 
-
-  // Compute theta vector as a linear combination of the shape functions
-  theta_vec = 0.0;
-  for(int i = 0; i < theta_values.Size(); i++)
-  {
-    Vector shape;
-    vshape.GetRow(i, shape);
-
-    // TODO testing negative dof indices
-    if(facedofs[i] < 0)
-      shape.Neg();
-
-    theta_vec.Add(theta_values(i), shape); 
-  }
-  //cout << "Theta Vector for FaceNo " << faceNo << ": "; theta_vec.Print(cout, theta_vec.Size());  
-  // Testing: compute normal to the face and then compute
-  // dot product of normal with theta vector to see if they
-  // are orthgonal.
-  //Vector normal(dim);
-  //CalcOrtho(ftr->Face->Jacobian(), normal);
-  //cout << "Theta vector dot with face normal = " << theta_vec * normal << endl;
-}
-
-/**
  *
  * This method arranges edge patch entities in an order.
  * Upward adjacent elements and faces of the edge
@@ -1523,7 +1410,6 @@ void evaluateThetaVector(int faceNo, Vector theta_values, Mesh* mesh,
  * only for interior edge patches currently. 
  *
  * TODO make this method more efficient (optimize)
- * TODO also include exterior edge patches in it
  *
  */
  void orderEdgePatchEntities(int edgeNo, int ne, int nf, const int* ei, const int* fi,
@@ -1844,7 +1730,7 @@ void computeLambda_BVP(int elemNo, FiniteElementSpace* fespace, Mesh* mesh,
   mesh->GetElementFaces(elemNo, elem_fcs, faces_or); 
   int nfaces = elem_fcs.Size();
 
-  Vector testfaceint(neldofs); testfaceint = 0.0;
+  //Vector testfaceint(neldofs); testfaceint = 0.0;
   // assemble the [ndofsx1] lambda vector
   for(int ii = 0; ii < nfaces; ii++)
   {
@@ -1901,7 +1787,7 @@ void computeLambda_BVP(int elemNo, FiniteElementSpace* fespace, Mesh* mesh,
       // 1. compute outward unit normal on the face
       Vector normal(dim); normal = 0.0;
       computeFaceOutwardNormal(faceNo, elemNo, normal, mesh);
-      normalizeVector(normal); 
+      normal /= normal.Norml2();
       //cout << "Normal for FaceNo " << faceNo << ": "; normal.Print(cout, theta_vec.Size()); 
 
       // 2. Compute curl and tk
@@ -1959,7 +1845,7 @@ void computeLambda_BVP(int elemNo, FiniteElementSpace* fespace, Mesh* mesh,
         Vector temp(neldofs); temp = 0.0;
         elemvshape.Mult(w_theta_plus_tk, temp); 
         lambda_k.Add(1.0, temp); 
-        testfaceint.Add(1.0, temp);   // test
+        //testfaceint.Add(1.0, temp);   // test
       }
       else
       {
@@ -1985,7 +1871,7 @@ void computeLambda_BVP(int elemNo, FiniteElementSpace* fespace, Mesh* mesh,
         Vector temp(neldofs); temp = 0.0;
         elemvshape.Mult(w_theta_plus_tk, temp); 
         lambda_k.Add(1.0, temp); 
-        testfaceint.Add(1.0, temp);   // test
+        //testfaceint.Add(1.0, temp);   // test
       }
 /*
       cout << "IP " << i << " of " << ir->GetNPoints() << endl;
@@ -2075,119 +1961,11 @@ void computeBilinearForm_BVP(int elemNo, Mesh* mesh, GridFunction x,
   for(int i = 0; i < eldofs.Size(); i++)
   {
     if(eldofs[i] < 0)
-     b_k(i) =  -1 * b_k(i); // TODO taking care of negative dof value
+     b_k(i) =  -1 * b_k(i); // taking care of negative dof value
   }
   
 }
 
-/**
- *
- *
- *
- */
-void applyDBC(int elemNo, Mesh* mesh, FiniteElementSpace* fespace, Table edge_face)
-{
-  Array<int> eldofs;
-  fespace->GetElementDofs(elemNo, eldofs);
-  //cout << "Element " << elemNo << " Dofs "; eldofs.Print(cout, eldofs.Size());
-  Array<int> elem_edges, edges_cor;
-  mesh->GetElementEdges(elemNo, elem_edges, edges_cor);
-  //cout << "Element " << elemNo << " Edges "; elem_edges.Print(cout, elem_edges.Size());
-  //cout << "Element " << elemNo << " Edge Orientations "; edges_cor.Print(cout, elem_edges.Size()); cout << endl;
-
-  // Face Dofs
-  Array<int> elem_faces, faces_cor;
-  mesh->GetElementFaces(elemNo, elem_faces, faces_cor);
-  for(int i = 0; i < elem_faces.Size(); i++)
-  {
-    int faceNo = elem_faces[i];
-    if(!mesh->FaceIsInterior(faceNo))
-    {
-      Array<int> facedofs;
-      fespace->GetFaceDofs(faceNo, facedofs);
-      //cout << "Exterior Face " << faceNo << " Dofs "; facedofs.Print(cout, facedofs.Size());
-      Array<int> faceintdofs;
-      fespace->GetFaceInteriorDofs(faceNo, faceintdofs);
-      //cout << "Exterior Face " << faceNo << " Interior Dofs "; faceintdofs.Print(cout, faceintdofs.Size());
-      Array<int> face_edges, faceedges_cor;
-      mesh->GetFaceEdges(faceNo, face_edges, faceedges_cor);
-      //cout << "Exterior Face " << faceNo << " Edges "; face_edges.Print(cout, face_edges.Size()); cout << endl;
-      for(int ee = 0; ee < face_edges.Size(); ee++)
-      {
-        int edgeNo = face_edges[ee];
-        Array<int> edgedofs;
-        fespace->GetEdgeDofs(edgeNo, edgedofs);
-        //cout << "EdgeNo " << edgeNo << " Dofs "; edgedofs.Print(cout, edgedofs.Size());
-      }
-    }
-    else
-    {
-      //cout << "Interior Face " << faceNo << endl;
-    }
-  }
-
-
-  // Get the local indices of boundary dofs in eldofs
-  std::vector<int> local_bdr_dofs;
-  // loop over edges to get edge dofs on bdry
-  for(int ee = 0; ee < elem_edges.Size(); ee++) 
-  {
-    int edgeNo = elem_edges[ee];
-    int nf = edge_face.RowSize(edgeNo);
-    const int* fi = edge_face.GetRow(edgeNo);
-    //cout << "Adjacent Faces of EdgeNo " << edgeNo << " : "; for(int i = 0; i < nf; i++) { cout << fi[i] << " "; } cout << endl;
-
-    if (1 == edgeIsExterior(edgeNo, nf, fi, mesh))
-    {
-      //cout << "EdgeNo " << edgeNo << " is on Boundary " << endl;
-      Array<int> edgedofs;
-      fespace->GetEdgeDofs(edgeNo, edgedofs); // get edge dofs
-
-      int index = 0;
-      for(int dd = 0; dd < edgedofs.Size(); dd++) // loop edge dofs
-      {
-        for(int i = 0; i < eldofs.Size(); i++)
-        {
-          if(eldofs[i] == edgedofs[dd] || eldofs[i] == (-1 - edgedofs[dd])) 
-            {local_bdr_dofs.push_back(i); break;}
-          else index++;
-        }
-      }
-    }    
-  }
-
-  // loop over bdry faces to get face dofs
-  for(int ff = 0; ff < elem_faces.Size(); ff++) 
-  {
-    int faceNo = elem_faces[ff];
-    if(!mesh->FaceIsInterior(faceNo)) // if bdry face
-    {
-      Array<int> faceintdofs;
-      fespace->GetFaceInteriorDofs(faceNo, faceintdofs); // get interior face dofs
-      
-      int index = 0;
-      for(int dd = 0; dd < faceintdofs.Size(); dd++) // loop interior dofs
-      {
-        for(int i = 0; i < eldofs.Size(); i++)
-        {
-          if(eldofs[i] == faceintdofs[dd]) 
-            {local_bdr_dofs.push_back(i); break;}
-          else index++;
-        }
-      }
-    }
-  }
-
-  //cout << "Dirichlet Boundary Dofs "; for(int i = 0; i < local_bdr_dofs.size(); i++) { cout << local_bdr_dofs[i] << " "; }
-        
-    
-   
-
-
-
-  
-  //cout << " --------------- " << endl;
-}
 
 
 /**
@@ -2195,6 +1973,9 @@ void applyDBC(int elemNo, Mesh* mesh, FiniteElementSpace* fespace, Table edge_fa
  * faces of an element. Need to change it so, that Dirichlet BC is
  * imposed only on Dirichlet boundary faces and not on Natural or Mixed
  * boundary faces.
+ *
+ * This function checks which dofs of an element are boundary dofs.
+ * Returns two arrays containint essential dofs and unessential dofs.
  *
  */
 void getEssentialElementTrueDofs(int elemNo, const Array<int> &bdr_attr_is_ess,
@@ -2435,4 +2216,5 @@ void printDenseMatrix(DenseMatrix mat)
     cout << endl;
   }
 }
-/////////////////////////////////////////////////END PROGRAM//////////////////////////////////////////////////////////////////////
+
+// End Program
