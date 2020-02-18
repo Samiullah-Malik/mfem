@@ -18,6 +18,7 @@ if (MFEM_USE_MPI)
     ex2.cpp
     ex3.cpp
     ex6p.cpp
+    ex3p.cpp
     )
 endif()
 
@@ -47,6 +48,7 @@ set(EX1_TEST_NP 1)
 set(EX1P_TEST_NP 8)
 set(EX2_TEST_NP 1)
 set(EX6P_TEST_NP 8)
+set(EX3P_TEST_NP 1)
 
 # Add the tests: one test per source file.
 foreach(SRC_FILE ${PUMI_EXAMPLES_SRCS})
