@@ -38,6 +38,8 @@
 //               TODO delete tables. define parfinite element space of higher order
 //               in error estimation
 
+#include <math.h>
+
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
@@ -127,6 +129,8 @@ int main(int argc, char *argv[])
   // 2. Parse command-line options.
   //const char *mesh_file = "/users/maliks2/Meshes/MaxwellMeshes/Beam/beam-tet.smb";
   const char *mesh_file = "/users/maliks2/Meshes/MaxwellMeshes/Fichera/25k/fichera_25k.smb";
+  //const char *mesh_file = "/users/maliks2/Meshes/MaxwellMeshes/Fichera/coarse/fichera.smb";
+  //const char *mesh_file = "after_adapt.smb";
 #ifdef MFEM_USE_SIMMETRIX
   //const char *model_file = "/users/maliks2/Meshes/MaxwellMeshes/Beam/beam.x_t";
   const char *model_file = "/users/maliks2/Meshes/MaxwellMeshes/Fichera/25k/fichera_25k_nat.x_t"; 
@@ -215,6 +219,15 @@ int main(int argc, char *argv[])
   }
   pumi_mesh->verify();
 
+  // Remove any fields 
+  int id = 0;
+  while (pumi_mesh->countFields() > 0)
+  {
+    apf::Field* f = pumi_mesh->getField(id);
+    pumi_mesh->removeField(f);
+    apf::destroyField(f);
+  }
+  pumi_mesh->verify();
 
   // 5. Create the parallel MFEM mesh object from the parallel PUMI mesh.  We
   //    can handle triangular and tetrahedral meshes. Note that the mesh
@@ -544,7 +557,7 @@ int main(int argc, char *argv[])
   exact_error_nodal_Field = apf::createField(pumi_mesh, "exact_error_nodal_field", apf::SCALAR, apf::getLagrange(1));
   l2_error_nodal_Field = apf::createField(pumi_mesh, "l2_error_nodal_field", apf::SCALAR, apf::getLagrange(1));
   E_exact_nodal_Field = apf::createField(pumi_mesh, "E_exact_nodal_field", apf::VECTOR, apf::getLagrange(1));
-  E_fem_nodal_Field = apf::createField(pumi_mesh, "E_fen_nodal_field", apf::VECTOR, apf::getLagrange(1));
+  E_fem_nodal_Field = apf::createField(pumi_mesh, "E_fem_nodal_field", apf::VECTOR, apf::getLagrange(1));
   element_size_Field = apf::createStepField(pumi_mesh, "element_size_Field", apf::SCALAR);
   nodal_size_Field = apf::createLagrangeField(pumi_mesh, "nodal_size_field", apf::SCALAR, 1);
   // ______________________________________________________________________________________________  
@@ -661,7 +674,6 @@ int main(int argc, char *argv[])
     double elem_l2integ_error = computeElementImplicitL2Error(elemNo, phi, pmesh, fespacep1);
     setScalar(l2_error_Field, ent, 0, elem_l2integ_error); // write to field
     global_l2_error += elem_l2integ_error;
-     
     elemNo++;
   }
   //--------------- END OF ERROR ESTIMATION ROUTINE ------------//
@@ -783,12 +795,12 @@ int main(int argc, char *argv[])
     {
       double currentEdge = apf::measure(pumi_mesh, edges[i]);   
       if(currentEdge < shortestEdge) { shortestEdge = currentEdge; }
-    }   
+    }
     double elem_error = apf::getScalar(l2_error_Field, ent, 0);    
-    double h_new = shortestEdge * pow(elem_target_error/elem_error, (2 / (2*1 + 3))); // p == 1, d == 3
+    double h_new = shortestEdge * pow(elem_target_error/elem_error, 2/double(2*1 + 3)); // 2/(2p + d),  p == 1, d == 3
 
     if (h_new < alpha*shortestEdge) h_new = alpha*shortestEdge; // clamping
-    if (h_new > beta*shortestEdge) h_new = beta*shortestEdge;
+    else if (h_new > beta*shortestEdge) h_new = beta*shortestEdge;
 
     apf::setScalar(element_size_Field, ent, 0, h_new); // set size field value
 
@@ -814,12 +826,37 @@ int main(int argc, char *argv[])
   }
 
   apf::writeVtkFiles("error_Fields", pumi_mesh); // Write all Fields
+  cout << " End Error Estimation " << endl;
 
+  // 18. Perform Mesh Adapt
+  pumi_mesh->writeNative("before_adapt.smb");
+  cout << "Begin Mesh Adapt " << endl;
+
+  // remove all fields except size field
+  int index = 0;
+  while (pumi_mesh->countFields() > 1)
+  {
+    apf::Field* f = pumi_mesh->getField(index);
+    if (f == nodal_size_Field) {
+       index++;
+       continue;
+    }
+    pumi_mesh->removeField(f);
+    apf::destroyField(f);
+  }
+  pumi_mesh->verify();
+
+  ma::Input* erinput = ma::configure(pumi_mesh, nodal_size_Field);
+  erinput->shouldFixShape = true;
+  erinput->maximumIterations = 6;
+  ma::adapt(erinput);
+  pumi_mesh->writeNative("after_adapt.smb");
+  apf::writeVtkFiles("adapted_mesh", pumi_mesh); // paraview adapted mesh
+  cout << "Finished Mesh Adapt " << endl;
   cout << " END ROUTINE " << endl;
 
 
 
-  cout << " End Error Estimation " << endl;
 
 
   // 18. Free the used memory.

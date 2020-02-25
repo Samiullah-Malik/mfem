@@ -19,6 +19,8 @@ if (MFEM_USE_MPI)
     ex3.cpp
     ex6p.cpp
     ex3p.cpp
+    mesh_adapt.cpp
+    GenerateMFEMMesh.cpp
     )
 endif()
 

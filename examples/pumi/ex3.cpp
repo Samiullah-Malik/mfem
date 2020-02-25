@@ -111,6 +111,8 @@ void f_exact(const Vector &, Vector &);
 double freq = 1.0, kappa;
 int dim;
 
+int mfem_vtk = 0; // write solution vtk files
+
 int main(int argc, char *argv[])
 {
    // 1. Initialize MPI (required by PUMI).
@@ -532,6 +534,13 @@ int main(int argc, char *argv[])
   E_fem_nodal_Field = apf::createField(pumi_mesh, "E_fen_nodal_field", apf::VECTOR, apf::getLagrange(1));
   element_size_Field = apf::createStepField(pumi_mesh, "element_size_Field", apf::SCALAR);
   nodal_size_Field = apf::createLagrangeField(pumi_mesh, "nodal_size_field", apf::SCALAR, 1);
+
+  L2_FECollection L2FEC(1 , 1);
+  FiniteElementSpace L2FESpace(mesh, &L2FEC);
+  GridFunction errors(&L2FESpace);
+  errors.SetSize(mesh->GetNE());
+  cout << " grid function size " << errors.Size() << endl;
+
   // ______________________________________________________________________________________________  
   
   // (15c). Solve Local BVPs
@@ -645,7 +654,9 @@ int main(int argc, char *argv[])
     // 7. Compute L2 Norm Integral Error
     double elem_l2integ_error = computeElementImplicitL2Error(elemNo, phi, mesh, fespacep1);
     setScalar(l2_error_Field, ent, 0, elem_l2integ_error); // write to field
+    errors(elemNo) = elem_l2integ_error; // write to gridfunction for paraview mfem visualization
     global_l2_error += elem_l2integ_error;
+
      
     elemNo++;
   }
@@ -762,7 +773,7 @@ int main(int argc, char *argv[])
 
   itr = pumi_mesh->begin(3);
   elemNo = 0;
-  while ((ent = pumi_mesh->iterate(itr)))  
+  while ((ent = pumi_mesh->iterate(itr)))
   {
     Adjacent edges;
     pumi_mesh->getAdjacent(ent, 1, edges); // get adjacent edges
@@ -802,7 +813,19 @@ int main(int argc, char *argv[])
     apf::setScalar(nodal_size_Field, ent, 0, average);
   }
 
-  apf::writeVtkFiles("error_Fields", pumi_mesh); // Write all Fields
+  apf::writeVtkFiles("error_Fields", pumi_mesh); // Write all PUMI VTK Fields
+
+  if(mfem_vtk)
+  {
+    // Save meshes and grid functions in VTK format
+    std::ofstream vtkFs( "mfem_mesh.vtk");
+    const int ref = 1;
+    mesh->PrintVTK( vtkFs, ref);
+    //x.SaveVTK( vtkFs, "solution_field", ref);
+    errors.SaveVTK( vtkFs, "error_field", ref);
+  }
+
+
 
   cout << " END ROUTINE " << endl;
 
@@ -2078,7 +2101,7 @@ void eliminateBCs(DenseMatrix& A, Vector& X, Vector& B, Array<int> ess_tdofs_lis
     }    
   }
   //cout << "Anew " << endl;
-  printDenseMatrix(Anew);
+  //printDenseMatrix(Anew);
   
 
   // 2. Assemble new B
@@ -2103,7 +2126,7 @@ void eliminateBCs(DenseMatrix& A, Vector& X, Vector& B, Array<int> ess_tdofs_lis
     }    
   }
   //cout << "Ae " << endl;
-  printDenseMatrix(Anew);
+  //printDenseMatrix(Anew);
 
   
   // this contains the known DBC dof values (e = 0);
