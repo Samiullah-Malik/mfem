@@ -21,6 +21,7 @@ if (MFEM_USE_MPI)
     ex3p.cpp
     mesh_adapt.cpp
     GenerateMFEMMesh.cpp
+    antenna.cpp
     )
 endif()
 
